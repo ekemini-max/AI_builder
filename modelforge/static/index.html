@@ -6,8 +6,13 @@
     <title>ModelForge - AutoML Training & Model Serving Platform</title>
     <link rel="stylesheet" href="/static/styles.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Chart.js via CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
+    <!-- Toast Notification Overlay -->
+    <div id="toast-container" class="toast-container"></div>
+
     <header class="app-header">
         <div class="logo-container">
             <span class="logo-icon">⚡</span>
@@ -20,143 +25,172 @@
     </header>
 
     <main class="container">
-        <!-- Model Selector & Summary -->
-        <section class="card shadow">
-            <div class="section-title">
-                <h2>Deployed Models</h2>
-                <button id="btn-refresh-models" class="btn btn-secondary">🔄 Refresh List</button>
-            </div>
-            <div id="models-list-container" class="models-grid">
-                <p class="placeholder-text">Loading models...</p>
-            </div>
-        </section>
+        <!-- Two-Column Layout -->
+        <div class="dashboard-layout">
 
-        <!-- Selected Model Dashboard Details -->
-        <section id="model-detail-section" class="card shadow hidden">
-            <div class="model-header-detail">
-                <div>
-                    <h2 id="detail-model-name">Model Name</h2>
-                    <p id="detail-model-desc" class="subtext">Description</p>
-                    <div class="tags-row">
-                        <span id="detail-task-type" class="badge">task</span>
-                        <span id="detail-model-id" class="badge badge-outline">ID</span>
-                    </div>
+            <!-- Left Column: Deployed Models List -->
+            <section class="card shadow col-left">
+                <div class="section-title">
+                    <h2>Deployed Models</h2>
+                    <button id="btn-refresh-models" class="btn btn-secondary btn-small">🔄 Refresh</button>
                 </div>
-                <div class="api-key-box">
-                    <label>API Key (X-API-Key Header):</label>
-                    <div class="key-input-row">
-                        <input type="text" id="detail-api-key" readonly>
-                        <button id="btn-copy-key" class="btn btn-small">Copy Key</button>
-                    </div>
+                <div id="models-list-container" class="models-list">
+                    <p class="placeholder-text">Loading models...</p>
                 </div>
-            </div>
+            </section>
 
-            <!-- Tab Navigation -->
-            <div class="tab-nav">
-                <button class="tab-btn active" data-tab="tab-autotrain">Auto-Train Dataset</button>
-                <button class="tab-btn" data-tab="tab-upload">Upload Model File</button>
-                <button class="tab-btn" data-tab="tab-versions">Version History & Metrics</button>
-                <button class="tab-btn" data-tab="tab-test">Live In-Browser Testing</button>
-            </div>
-
-            <!-- Tab 1: Auto-Train -->
-            <div id="tab-autotrain" class="tab-content active">
-                <h3>Upload Dataset & Auto-Train</h3>
-                <p class="subtext">Vision: ZIP of class folders. Text: CSV with text and label columns. Every model is evaluated on a strict held-out test split.</p>
-                <form id="form-autotrain" class="form-grid">
-                    <div class="form-group">
-                        <label>Select Dataset File (.zip for images, .csv for text):</label>
-                        <input type="file" id="autotrain-file" required>
-                    </div>
-                    <div id="text-col-options" class="form-group hidden">
-                        <label>Text Column Name (Optional):</label>
-                        <input type="text" id="autotrain-text-col" placeholder="e.g., text, review, body">
-                        <label style="margin-top:8px;">Label Column Name (Optional):</label>
-                        <input type="text" id="autotrain-label-col" placeholder="e.g., label, category, target">
-                    </div>
-                    <button type="submit" id="btn-start-train" class="btn btn-success">⚡ Start Auto-Train Pipeline</button>
-                </form>
-                <div id="autotrain-status" class="status-box hidden"></div>
-
-                <!-- External GPU Handoff Modal/Notice -->
-                <div id="gpu-handoff-notice" class="alert alert-warning hidden">
-                    <h4>GPU Handoff Required</h4>
-                    <p id="gpu-handoff-reason">Dataset size or complexity requires GPU fine-tuning to reach high accuracy.</p>
-                    <p>ModelForge runs within $0 budget limits. Download the pre-generated Google Colab / Hugging Face AutoTrain notebook below to train on free GPU:</p>
-                    <a id="gpu-download-link" class="btn btn-primary" download>📥 Download Colab GPU Notebook</a>
-                </div>
-            </div>
-
-            <!-- Tab 2: Upload Trained Model File -->
-            <div id="tab-upload" class="tab-content">
-                <h3>Upload Pre-trained Model</h3>
-                <p class="subtext">Supported formats: .onnx (preferred), .pt/.pth, .h5, .joblib. Sanity inference check will be executed before registration.</p>
-                <form id="form-upload-model" class="form-grid">
-                    <div class="form-group">
-                        <label>Class Labels (Comma-Separated):</label>
-                        <input type="text" id="upload-classes" placeholder="cat, dog, bird" required>
-                    </div>
-                    <div class="form-group">
-                        <label>Model File (.onnx, .pt, .pth, .h5, .joblib):</label>
-                        <input type="file" id="upload-model-file" required>
-                    </div>
-                    <div class="form-group">
-                        <label>Preprocessor / Vectorizer File (Optional for Text .joblib):</label>
-                        <input type="file" id="upload-prep-file">
-                    </div>
-                    <button type="submit" class="btn btn-primary">📤 Upload & Register Model</button>
-                </form>
-                <div id="upload-status" class="status-box hidden"></div>
-            </div>
-
-            <!-- Tab 3: Version History & Detailed Per-Class Metrics -->
-            <div id="tab-versions" class="tab-content">
-                <h3>Model Version History & Audit Metrics</h3>
-                <p class="subtext">Honesty Layer: Clear distinction between held-out test accuracy vs training sanity flags.</p>
-                <div id="version-history-list" class="versions-list">
-                    <p>Loading versions...</p>
-                </div>
-            </div>
-
-            <!-- Tab 4: Live In-Browser Testing -->
-            <div id="tab-test" class="tab-content">
-                <h3>Test Model Endpoint Directly</h3>
-                <p class="subtext">Simulate external API calls. Evaluates inputs and applies configurable confidence threshold routing.</p>
-                <div id="test-interface" class="test-box">
-                    <!-- Vision Input -->
-                    <div id="test-vision-box" class="form-group hidden">
-                        <label>Upload Image for Inference:</label>
-                        <input type="file" id="test-image-input" accept="image/*">
-                        <img id="test-image-preview" class="image-preview hidden">
-                    </div>
-                    <!-- Text Input -->
-                    <div id="test-text-box" class="form-group hidden">
-                        <label>Enter Input Text:</label>
-                        <textarea id="test-text-input" rows="4" placeholder="Type text sample here..."></textarea>
-                    </div>
-                    <button id="btn-run-inference" class="btn btn-success">🚀 Run Inference</button>
-
-                    <div id="inference-results" class="results-card hidden">
-                        <h4>Prediction Output</h4>
-                        <div class="result-row">
-                            <span>Predicted Class:</span>
-                            <strong id="res-predicted-class">-</strong>
+            <!-- Right Column: Active Model Detail & Metrics Workspace -->
+            <section id="model-detail-section" class="card shadow col-right hidden">
+                <div class="model-header-detail">
+                    <div>
+                        <h2 id="detail-model-name">Model Name</h2>
+                        <p id="detail-model-desc" class="subtext">Description</p>
+                        <div class="tags-row">
+                            <span id="detail-task-type" class="badge">task</span>
+                            <span id="detail-model-id" class="badge badge-outline">ID</span>
                         </div>
-                        <div class="result-row">
-                            <span>Confidence Score:</span>
-                            <strong id="res-confidence">-</strong>
-                        </div>
-                        <div id="res-uncertain-badge" class="alert alert-warning hidden">
-                            ⚠️ Low Confidence Warning: Score is below confidence threshold. Routed for downstream review.
-                        </div>
-                        <div style="margin-top: 15px;">
-                            <h5>Class Probabilities:</h5>
-                            <div id="res-probabilities-bars"></div>
+                    </div>
+                    <div class="api-key-box">
+                        <label>API Key (X-API-Key Header):</label>
+                        <div class="key-input-row">
+                            <input type="text" id="detail-api-key" readonly>
+                            <button id="btn-copy-key" class="btn btn-small btn-secondary">Copy</button>
                         </div>
                     </div>
                 </div>
-            </div>
-        </section>
+
+                <!-- Tab Navigation -->
+                <div class="tab-nav">
+                    <button class="tab-btn active" data-tab="tab-autotrain">Auto-Train Dataset</button>
+                    <button class="tab-btn" data-tab="tab-upload">Upload Model File</button>
+                    <button class="tab-btn" data-tab="tab-versions">Metrics & Version Audit</button>
+                    <button class="tab-btn" data-tab="tab-test">Live Test Endpoint</button>
+                </div>
+
+                <!-- Tab 1: Auto-Train -->
+                <div id="tab-autotrain" class="tab-content active">
+                    <h3>Upload Dataset & Auto-Train</h3>
+                    <p class="subtext">Vision: ZIP of class folders. Text: CSV with text and label columns. Every model is evaluated on a strict held-out test split.</p>
+                    <form id="form-autotrain" class="form-grid">
+                        <div class="form-group">
+                            <label>Select Dataset File (.zip for images, .csv for text):</label>
+                            <input type="file" id="autotrain-file" required>
+                        </div>
+                        <div id="text-col-options" class="form-group hidden">
+                            <label>Text Column Name (Optional):</label>
+                            <input type="text" id="autotrain-text-col" placeholder="e.g., text, review, body">
+                            <label style="margin-top:8px;">Label Column Name (Optional):</label>
+                            <input type="text" id="autotrain-label-col" placeholder="e.g., label, category, target">
+                        </div>
+                        <button type="submit" id="btn-start-train" class="btn btn-success btn-large">
+                            <span id="train-btn-text">⚡ Start Auto-Train Pipeline</span>
+                            <span id="train-spinner" class="spinner hidden"></span>
+                        </button>
+                    </form>
+                    <div id="autotrain-status" class="status-box hidden"></div>
+
+                    <!-- External GPU Handoff Notice -->
+                    <div id="gpu-handoff-notice" class="alert alert-warning hidden">
+                        <h4>GPU Handoff Required</h4>
+                        <p id="gpu-handoff-reason">Dataset size or complexity requires GPU fine-tuning to reach high accuracy.</p>
+                        <p>ModelForge runs within $0 budget limits. Download the pre-generated Google Colab / Hugging Face AutoTrain notebook below to train on free GPU:</p>
+                        <a id="gpu-download-link" class="btn btn-primary" download>📥 Download Colab GPU Notebook</a>
+                    </div>
+                </div>
+
+                <!-- Tab 2: Upload Trained Model File -->
+                <div id="tab-upload" class="tab-content">
+                    <h3>Upload Pre-trained Model</h3>
+                    <p class="subtext">Supported formats: .onnx (preferred), .pt/.pth, .h5, .joblib. Sanity inference check will be executed before registration.</p>
+                    <form id="form-upload-model" class="form-grid">
+                        <div class="form-group">
+                            <label>Class Labels (Comma-Separated):</label>
+                            <input type="text" id="upload-classes" placeholder="cat, dog, bird" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Model File (.onnx, .pt, .pth, .h5, .joblib):</label>
+                            <input type="file" id="upload-model-file" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Preprocessor / Vectorizer File (Optional for Text .joblib):</label>
+                            <input type="file" id="upload-prep-file">
+                        </div>
+                        <button type="submit" class="btn btn-primary">📤 Upload & Register Model</button>
+                    </form>
+                    <div id="upload-status" class="status-box hidden"></div>
+                </div>
+
+                <!-- Tab 3: Metrics & Version Audit -->
+                <div id="tab-versions" class="tab-content">
+                    <h3>Model Metrics & Version History</h3>
+                    <p class="subtext">Honesty Layer: Transparent per-class evaluation metrics and held-out split verification.</p>
+
+                    <!-- Active Version Visual Metrics Panel -->
+                    <div id="active-metrics-visual-panel" class="metrics-visual-panel hidden">
+                        <div class="metrics-panel-header">
+                            <h4>Active Version Metrics Visualizer</h4>
+                            <span id="trust-badge-active" class="badge">Evaluation Split</span>
+                        </div>
+
+                        <!-- Chart & Confusion Matrix Row -->
+                        <div class="visual-row">
+                            <div class="chart-container">
+                                <h5>Per-Class F1 Scores</h5>
+                                <canvas id="f1-chart-canvas"></canvas>
+                            </div>
+                            <div class="matrix-container">
+                                <h5>Confusion Matrix</h5>
+                                <div id="confusion-matrix-table-wrap"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="version-history-list" class="versions-list">
+                        <p>Loading versions...</p>
+                    </div>
+                </div>
+
+                <!-- Tab 4: Live In-Browser Testing -->
+                <div id="tab-test" class="tab-content">
+                    <h3>Test Model Endpoint Directly</h3>
+                    <p class="subtext">Simulate external API calls. Evaluates inputs and applies configurable confidence threshold routing.</p>
+                    <div id="test-interface" class="test-box">
+                        <div id="test-vision-box" class="form-group hidden">
+                            <label>Upload Image for Inference:</label>
+                            <input type="file" id="test-image-input" accept="image/*">
+                            <img id="test-image-preview" class="image-preview hidden">
+                        </div>
+                        <div id="test-text-box" class="form-group hidden">
+                            <label>Enter Input Text:</label>
+                            <textarea id="test-text-input" rows="4" placeholder="Type text sample here..."></textarea>
+                        </div>
+                        <button id="btn-run-inference" class="btn btn-success btn-large">
+                            <span id="infer-btn-text">🚀 Run Inference</span>
+                            <span id="infer-spinner" class="spinner hidden"></span>
+                        </button>
+
+                        <div id="inference-results" class="results-card hidden">
+                            <h4>Prediction Output</h4>
+                            <div class="result-row">
+                                <span>Predicted Class:</span>
+                                <strong id="res-predicted-class">-</strong>
+                            </div>
+                            <div class="result-row">
+                                <span>Confidence Score:</span>
+                                <strong id="res-confidence">-</strong>
+                            </div>
+                            <div id="res-uncertain-badge" class="alert alert-warning hidden">
+                                ⚠️ Low Confidence Warning: Score is below confidence threshold. Routed for downstream review.
+                            </div>
+                            <div style="margin-top: 15px;">
+                                <h5>Class Probabilities:</h5>
+                                <div id="res-probabilities-bars"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
     </main>
 
     <!-- Create Model Modal -->

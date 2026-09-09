@@ -1,4 +1,5 @@
 let currentSelectedModel = null;
+let f1ChartInstance = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     loadModelsList();
@@ -20,7 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('btn-copy-key').addEventListener('click', () => {
         const keyInput = document.getElementById('detail-api-key');
         navigator.clipboard.writeText(keyInput.value);
-        alert('API Key copied to clipboard!');
+        showToast('API Key copied to clipboard!', 'success');
     });
 
     // Tab Switching
@@ -53,6 +54,19 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 
+function showToast(message, type = 'success') {
+    const container = document.getElementById('toast-container');
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.textContent = message;
+    container.appendChild(toast);
+
+    setTimeout(() => {
+        toast.remove();
+    }, 4000);
+}
+
+
 async function loadModelsList() {
     const container = document.getElementById('models-list-container');
     container.innerHTML = '<p class="placeholder-text">Loading models...</p>';
@@ -73,23 +87,26 @@ async function loadModelsList() {
                 card.className = `model-card ${currentSelectedModel && currentSelectedModel.id === model.id ? 'selected' : ''}`;
 
                 let accuracyText = 'Not trained/uploaded';
+                let accuracyColor = 'var(--text-muted)';
                 if (model.metrics && model.metrics.accuracy !== undefined) {
                     const accPct = (model.metrics.accuracy * 100).toFixed(1);
                     const isHeldOut = model.metrics.is_trustworthy_held_out;
-                    accuracyText = `Acc: ${accPct}% (${isHeldOut ? 'Held-out test' : 'Sanity'})`;
+                    accuracyText = `Acc: ${accPct}% (${isHeldOut ? 'Held-out' : 'Sanity'})`;
+                    accuracyColor = 'var(--accent-green)';
                 }
 
                 card.innerHTML = `
-                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <div class="model-card-header">
                         <h3>${model.name}</h3>
                         <span class="badge">${model.task_type}</span>
                     </div>
-                    <p class="subtext" style="margin: 8px 0;">${model.description || 'No description'}</p>
-                    <div style="font-size:13px; font-weight:600; color: var(--accent-green);">
+                    <p class="model-desc-preview">${model.description || 'No description provided'}</p>
+                    <div style="font-size:12px; font-weight:600; color: ${accuracyColor}; margin-bottom: 6px;">
                         ${accuracyText}
                     </div>
-                    <div style="font-size:12px; color: var(--text-muted); margin-top: 4px;">
-                        Versions: ${model.version_count}
+                    <div class="model-card-footer">
+                        <span>Versions: ${model.version_count}</span>
+                        <span>Threshold: ${model.confidence_threshold}</span>
                     </div>
                 `;
 
@@ -111,10 +128,10 @@ async function selectModel(modelId) {
         if (data.status === 'ok') {
             currentSelectedModel = data.model;
             renderModelDetails(data.model);
-            loadModelsList(); // Highlight selected
+            loadModelsList();
         }
     } catch (err) {
-        alert('Failed to load model details: ' + err.message);
+        showToast('Failed to load model details: ' + err.message, 'error');
     }
 }
 
@@ -127,7 +144,7 @@ function renderModelDetails(model) {
     document.getElementById('detail-model-id').textContent = `ID: ${model.id}`;
     document.getElementById('detail-api-key').value = model.api_key;
 
-    // Toggle text column options in Auto-Train form
+    // Toggle text column options
     const textColBox = document.getElementById('text-col-options');
     if (model.task_type === 'text') {
         textColBox.classList.remove('hidden');
@@ -146,17 +163,48 @@ function renderModelDetails(model) {
         testVisionBox.classList.add('hidden');
     }
 
-    renderVersionHistory(model.versions);
+    renderVersionHistoryAndVisuals(model.versions, model.active_version_id);
 }
 
 
-function renderVersionHistory(versions) {
+function renderVersionHistoryAndVisuals(versions, activeVersionId) {
     const listContainer = document.getElementById('version-history-list');
+    const visualPanel = document.getElementById('active-metrics-visual-panel');
+
     if (!versions || versions.length === 0) {
         listContainer.innerHTML = '<p class="subtext">No versions registered for this model yet.</p>';
+        visualPanel.classList.add('hidden');
         return;
     }
 
+    // Find active version
+    const activeVersion = versions.find(v => v.id === activeVersionId) || versions[versions.length - 1];
+
+    // Render active version Chart & Matrix if metrics present
+    if (activeVersion && activeVersion.evaluation_metrics) {
+        visualPanel.classList.remove('hidden');
+        const em = activeVersion.evaluation_metrics;
+
+        // Trust badge
+        const trustBadge = document.getElementById('trust-badge-active');
+        if (em.is_trustworthy_held_out) {
+            trustBadge.className = 'badge badge-free';
+            trustBadge.textContent = '✅ Trustworthy: Held-Out Test Evaluation';
+        } else {
+            trustBadge.className = 'badge badge-warning';
+            trustBadge.textContent = '⚠️ Optimistic: Training/Sanity Evaluation';
+        }
+
+        // Render F1 Chart
+        renderF1Chart(em.per_class_metrics);
+
+        // Render Confusion Matrix
+        renderConfusionMatrix(em.classes || Object.keys(em.per_class_metrics || {}), em.confusion_matrix);
+    } else {
+        visualPanel.classList.add('hidden');
+    }
+
+    // Render list of all versions
     listContainer.innerHTML = '';
     versions.slice().reverse().forEach(v => {
         const item = document.createElement('div');
@@ -188,10 +236,10 @@ function renderVersionHistory(versions) {
                     <div class="metric-box"><label>Recall</label><span>${(em.macro_recall * 100).toFixed(1)}%</span></div>
                     <div class="metric-box"><label>Macro F1</label><span>${(em.macro_f1 * 100).toFixed(1)}%</span></div>
                 </div>
-                <div style="font-size:12px; margin-bottom:8px;">
-                    <strong>Evaluation Split Integrity:</strong>
+                <div style="font-size:11px; margin-bottom:8px;">
+                    <strong>Integrity:</strong>
                     <span class="badge ${em.is_trustworthy_held_out ? 'badge-free' : 'badge-outline'}">
-                        ${em.is_trustworthy_held_out ? '✅ Genuine Held-out Test Split' : '⚠️ Training/Sanity Check Only'}
+                        ${em.is_trustworthy_held_out ? '✅ Held-out test split' : '⚠️ Training/Sanity check'}
                     </span>
                 </div>
                 <table class="per-class-table">
@@ -207,8 +255,8 @@ function renderVersionHistory(versions) {
             <div style="display:flex; justify-content:space-between; align-items:center;">
                 <div>
                     <strong>Version ${v.version_number}</strong>
-                    <span class="badge" style="margin-left:8px;">${v.format}</span>
-                    <span class="subtext" style="margin-left:8px;">Source: ${v.source}</span>
+                    <span class="badge" style="margin-left:6px;">${v.format}</span>
+                    <span class="subtext" style="margin-left:6px;">Source: ${v.source}</span>
                 </div>
                 <div>
                     ${v.is_active ? '<span class="badge badge-free">ACTIVE</span>' : `<button class="btn btn-secondary btn-small" onclick="handleRollback(${v.version_number})">Rollback to v${v.version_number}</button>`}
@@ -219,6 +267,83 @@ function renderVersionHistory(versions) {
 
         listContainer.appendChild(item);
     });
+}
+
+
+function renderF1Chart(perClassMetrics) {
+    if (!perClassMetrics) return;
+
+    const labels = Object.keys(perClassMetrics);
+    const f1Scores = labels.map(cls => (perClassMetrics[cls].f1 * 100).toFixed(1));
+
+    const ctx = document.getElementById('f1-chart-canvas').getContext('2d');
+
+    if (f1ChartInstance) {
+        f1ChartInstance.destroy();
+    }
+
+    f1ChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'F1 Score (%)',
+                data: f1Scores,
+                backgroundColor: 'rgba(56, 189, 248, 0.6)',
+                borderColor: '#38bdf8',
+                borderWidth: 1,
+                borderRadius: 4
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    max: 100,
+                    ticks: { color: '#94a3b8' },
+                    grid: { color: '#334155' }
+                },
+                x: {
+                    ticks: { color: '#94a3b8' },
+                    grid: { color: '#334155' }
+                }
+            },
+            plugins: {
+                legend: { display: false }
+            }
+        }
+    });
+}
+
+
+function renderConfusionMatrix(classes, confusionMatrix) {
+    const wrap = document.getElementById('confusion-matrix-table-wrap');
+    if (!confusionMatrix || !classes || confusionMatrix.length === 0) {
+        wrap.innerHTML = '<p class="subtext">No confusion matrix data available.</p>';
+        return;
+    }
+
+    let tableHtml = '<table class="matrix-table"><thead><tr><th>Actual \\ Pred</th>';
+    classes.forEach(c => {
+        tableHtml += `<th>${c}</th>`;
+    });
+    tableHtml += '</tr></thead><tbody>';
+
+    const maxVal = Math.max(...confusionMatrix.flat(), 1);
+
+    confusionMatrix.forEach((row, i) => {
+        tableHtml += `<tr><th>${classes[i] || 'Class ' + i}</th>`;
+        row.forEach((val, j) => {
+            const intensity = Math.min((val / maxVal), 1);
+            const bgColor = i === j ? `rgba(34, 197, 94, ${0.2 + intensity * 0.6})` : `rgba(239, 68, 68, ${intensity * 0.5})`;
+            tableHtml += `<td style="background-color: ${bgColor}; color: #fff;" class="matrix-cell">${val}</td>`;
+        });
+        tableHtml += '</tr>';
+    });
+
+    tableHtml += '</tbody></table>';
+    wrap.innerHTML = tableHtml;
 }
 
 
@@ -240,13 +365,14 @@ async function handleCreateModel(e) {
         if (data.status === 'ok') {
             document.getElementById('modal-create-model').classList.add('hidden');
             document.getElementById('form-create-model').reset();
+            showToast(`Model '${name}' created successfully!`, 'success');
             await loadModelsList();
             selectModel(data.model.id);
         } else {
-            alert('Failed to create model: ' + data.message);
+            showToast('Failed to create model: ' + data.message, 'error');
         }
     } catch (err) {
-        alert('Error creating model: ' + err.message);
+        showToast('Error creating model: ' + err.message, 'error');
     }
 }
 
@@ -260,9 +386,14 @@ async function handleAutoTrain(e) {
 
     const statusBox = document.getElementById('autotrain-status');
     const gpuNotice = document.getElementById('gpu-handoff-notice');
+    const btnText = document.getElementById('train-btn-text');
+    const spinner = document.getElementById('train-spinner');
+
+    btnText.textContent = '⏳ Training in progress...';
+    spinner.classList.remove('hidden');
     statusBox.classList.remove('hidden');
     statusBox.style.background = 'var(--bg-input)';
-    statusBox.textContent = '⏳ Validating dataset and running training pipeline...';
+    statusBox.textContent = '⏳ Validating dataset, checking class balance, and executing CPU training pipeline...';
     gpuNotice.classList.add('hidden');
 
     const formData = new FormData();
@@ -289,19 +420,29 @@ async function handleAutoTrain(e) {
                 document.getElementById('gpu-handoff-reason').textContent = data.message;
                 const link = document.getElementById('gpu-download-link');
                 link.href = `/static/../notebooks/${data.gpu_handoff.notebook_filename}`;
+                showToast('GPU Handoff required for large dataset.', 'error');
             } else {
                 statusBox.style.background = 'rgba(34, 197, 94, 0.2)';
                 statusBox.textContent = `✅ ${data.message} (Version ${data.version_number} created with Acc: ${(data.metrics.accuracy * 100).toFixed(1)}%)`;
+                showToast(`Model auto-trained successfully! Acc: ${(data.metrics.accuracy * 100).toFixed(1)}%`, 'success');
                 selectModel(currentSelectedModel.id);
             }
         } else {
             statusBox.style.background = 'rgba(239, 68, 68, 0.2)';
             let issueText = data.detail ? (data.detail.message || JSON.stringify(data.detail)) : 'Training failed';
+            if (data.detail && data.detail.issues) {
+                issueText += ' Issues: ' + data.detail.issues.join('; ');
+            }
             statusBox.textContent = `❌ ${issueText}`;
+            showToast('Dataset validation or training failed.', 'error');
         }
     } catch (err) {
         statusBox.style.background = 'rgba(239, 68, 68, 0.2)';
         statusBox.textContent = `❌ Network error: ${err.message}`;
+        showToast('Network error during training request.', 'error');
+    } finally {
+        btnText.textContent = '⚡ Start Auto-Train Pipeline';
+        spinner.classList.add('hidden');
     }
 }
 
@@ -319,7 +460,7 @@ async function handleUploadModel(e) {
     const statusBox = document.getElementById('upload-status');
     statusBox.classList.remove('hidden');
     statusBox.style.background = 'var(--bg-input)';
-    statusBox.textContent = '⏳ Validating uploaded model file...';
+    statusBox.textContent = '⏳ Validating uploaded model file and running sanity check...';
 
     const formData = new FormData();
     formData.append('classes', classes);
@@ -338,14 +479,17 @@ async function handleUploadModel(e) {
         if (res.ok) {
             statusBox.style.background = 'rgba(34, 197, 94, 0.2)';
             statusBox.textContent = `✅ ${data.message} (Version ${data.version_number} registered as active)`;
+            showToast('Model file uploaded and registered!', 'success');
             selectModel(currentSelectedModel.id);
         } else {
             statusBox.style.background = 'rgba(239, 68, 68, 0.2)';
             statusBox.textContent = `❌ ${data.detail ? data.detail.message : 'Upload failed'}`;
+            showToast('Model upload validation failed.', 'error');
         }
     } catch (err) {
         statusBox.style.background = 'rgba(239, 68, 68, 0.2)';
         statusBox.textContent = `❌ Network error: ${err.message}`;
+        showToast('Upload network error.', 'error');
     }
 }
 
@@ -362,13 +506,13 @@ async function handleRollback(versionNumber) {
         const data = await res.json();
 
         if (res.ok) {
-            alert(`Successfully rolled back to active version ${versionNumber}`);
+            showToast(`Rolled back model active version to v${versionNumber}`, 'success');
             selectModel(currentSelectedModel.id);
         } else {
-            alert('Rollback failed: ' + (data.detail ? data.detail.message : 'Unknown error'));
+            showToast('Rollback failed: ' + (data.detail ? data.detail.message : 'Unknown error'), 'error');
         }
     } catch (err) {
-        alert('Rollback error: ' + err.message);
+        showToast('Rollback error: ' + err.message, 'error');
     }
 }
 
@@ -377,7 +521,12 @@ async function handleRunInference() {
     if (!currentSelectedModel) return;
 
     const resultsCard = document.getElementById('inference-results');
+    const btnText = document.getElementById('infer-btn-text');
+    const spinner = document.getElementById('infer-spinner');
+
     resultsCard.classList.add('hidden');
+    btnText.textContent = '⏳ Executing Inference...';
+    spinner.classList.remove('hidden');
 
     const headers = {
         'X-API-Key': currentSelectedModel.api_key
@@ -388,7 +537,9 @@ async function handleRunInference() {
     if (currentSelectedModel.task_type === 'vision') {
         const fileInput = document.getElementById('test-image-input');
         if (!fileInput.files[0]) {
-            alert('Please select an image file first.');
+            showToast('Please select an image file first.', 'error');
+            btnText.textContent = '🚀 Run Inference';
+            spinner.classList.add('hidden');
             return;
         }
         bodyData = new FormData();
@@ -396,7 +547,9 @@ async function handleRunInference() {
     } else {
         const textInput = document.getElementById('test-text-input').value;
         if (!textInput) {
-            alert('Please enter text for inference.');
+            showToast('Please enter text for inference.', 'error');
+            btnText.textContent = '🚀 Run Inference';
+            spinner.classList.add('hidden');
             return;
         }
         headers['Content-Type'] = 'application/json';
@@ -443,10 +596,15 @@ async function handleRunInference() {
                     barsContainer.appendChild(row);
                 });
             }
+            showToast('Inference returned successfully!', 'success');
         } else {
-            alert('Inference error: ' + (data.detail ? data.detail.message : JSON.stringify(data)));
+            const errDetail = data.detail ? (data.detail.message || JSON.stringify(data.detail)) : JSON.stringify(data);
+            showToast('Inference failed: ' + errDetail, 'error');
         }
     } catch (err) {
-        alert('Inference request failed: ' + err.message);
+        showToast('Inference request failed: ' + err.message, 'error');
+    } finally {
+        btnText.textContent = '🚀 Run Inference';
+        spinner.classList.add('hidden');
     }
 }
