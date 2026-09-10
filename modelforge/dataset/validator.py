@@ -70,11 +70,8 @@ def validate_vision_dataset(zip_filepath: str, min_per_class: int = 10) -> Tuple
             fingerprint=fingerprint
         ), None
 
-    # Scan directory structure for class folders
-    # Handled both direct class folders and single root wrapper folder
     subdirs = [d for d in os.listdir(extract_dir) if os.path.isdir(os.path.join(extract_dir, d)) and not d.startswith("__") and not d.startswith(".")]
 
-    # If single top-level folder wrapping everything
     target_dir = extract_dir
     if len(subdirs) == 1:
         nested_dir = os.path.join(extract_dir, subdirs[0])
@@ -113,12 +110,9 @@ def validate_vision_dataset(zip_filepath: str, min_per_class: int = 10) -> Tuple
                     continue
 
                 img_path = os.path.join(root, file)
-
-                # Check readability & corruption
                 try:
                     with Image.open(img_path) as img:
                         img.verify()
-                    # Re-open for hash check if needed
                     with open(img_path, "rb") as img_f:
                         img_hash = hashlib.md5(img_f.read()).hexdigest()
                         if img_hash in duplicate_hashes:
@@ -138,12 +132,10 @@ def validate_vision_dataset(zip_filepath: str, min_per_class: int = 10) -> Tuple
     if duplicate_count > 0:
         warnings.append(f"Found {duplicate_count} duplicate image files across the dataset.")
 
-    # Check minimum per class
     underpopulated_classes = [c for c, count in class_distribution.items() if count < min_per_class]
     if underpopulated_classes:
         issues.append(f"The following classes have fewer than {min_per_class} valid samples: {', '.join(underpopulated_classes)}. Minimum required per class is {min_per_class}.")
 
-    # Check balance
     counts = list(class_distribution.values())
     max_c = max(counts) if counts else 0
     min_c = min(counts) if counts else 0
@@ -155,7 +147,6 @@ def validate_vision_dataset(zip_filepath: str, min_per_class: int = 10) -> Tuple
         is_balanced = False
         warnings.append(f"Dataset is significantly imbalanced (max class has {max_c} samples, min has {min_c}). Model accuracy on rare classes may suffer.")
 
-    # Rule on feasibility of reaching 85% accuracy
     if total_samples < 50:
         warnings.append("Total dataset size is under 50 samples. Achieving high accuracy (>=85%) on held-out test data is unlikely with so few samples.")
 
@@ -213,8 +204,29 @@ def validate_text_dataset(csv_filepath: str, min_per_class: int = 10, text_col: 
             fingerprint=fingerprint
         ), None
 
-    # Auto-detect text and label columns if not provided
-    cols = df.columns.tolist()
+    cols = [str(c) for c in df.columns.tolist()]
+
+    # Verify explicitly requested text_col and label_col exist in df.columns BEFORE calling pandas ops
+    missing_cols = []
+    if text_col and text_col not in cols:
+        missing_cols.append(f"Text column '{text_col}' not found.")
+    if label_col and label_col not in cols:
+        missing_cols.append(f"Label column '{label_col}' not found.")
+
+    if missing_cols:
+        avail_str = ", ".join(cols)
+        return ValidationResult(
+            is_valid=False,
+            status="rejected",
+            task_type="text",
+            sample_count=len(df),
+            class_distribution={},
+            is_balanced=False,
+            issues=[f"{' '.join(missing_cols)} Available columns: {avail_str}"],
+            fingerprint=fingerprint,
+            text_column=text_col,
+            label_column=label_col
+        ), None
 
     if not text_col:
         text_candidates = ["text", "body", "content", "message", "sentence", "review", "comment"]
@@ -224,7 +236,6 @@ def validate_text_dataset(csv_filepath: str, min_per_class: int = 10, text_col: 
                 text_col = matches[0]
                 break
         if not text_col:
-            # Pick first string-like column
             for c in cols:
                 if df[c].dtype == object or isinstance(df[c].iloc[0], str):
                     text_col = c
@@ -238,7 +249,6 @@ def validate_text_dataset(csv_filepath: str, min_per_class: int = 10, text_col: 
                 label_col = matches[0]
                 break
         if not label_col:
-            # Pick second column or non-text column
             for c in cols:
                 if c != text_col:
                     label_col = c
@@ -252,11 +262,11 @@ def validate_text_dataset(csv_filepath: str, min_per_class: int = 10, text_col: 
             sample_count=len(df),
             class_distribution={},
             is_balanced=False,
-            issues=["Could not auto-detect distinct text and label columns in CSV. Please specify column names."],
+            issues=[f"Could not auto-detect distinct text and label columns in CSV. Available columns: {', '.join(cols)}"],
             fingerprint=fingerprint
         ), None
 
-    # Clean missing / empty values
+    # Clean missing / empty values safely
     initial_count = len(df)
     cleaned_df = df.dropna(subset=[text_col, label_col]).copy()
     cleaned_df[text_col] = cleaned_df[text_col].astype(str).str.strip()
@@ -268,7 +278,6 @@ def validate_text_dataset(csv_filepath: str, min_per_class: int = 10, text_col: 
     if dropped_nulls > 0:
         warnings.append(f"Dropped {dropped_nulls} rows with missing text or label values.")
 
-    # Check duplicate rows
     initial_clean_count = len(cleaned_df)
     cleaned_df = cleaned_df.drop_duplicates(subset=[text_col])
     duplicate_count = initial_clean_count - len(cleaned_df)
@@ -288,7 +297,6 @@ def validate_text_dataset(csv_filepath: str, min_per_class: int = 10, text_col: 
             fingerprint=fingerprint
         ), None
 
-    # Class distribution
     class_counts_series = cleaned_df[label_col].value_counts()
     class_distribution = {str(k): int(v) for k, v in class_counts_series.to_dict().items()}
 
@@ -306,7 +314,6 @@ def validate_text_dataset(csv_filepath: str, min_per_class: int = 10, text_col: 
             label_column=label_col
         ), None
 
-    # Check minimum per class
     underpopulated_classes = [c for c, count in class_distribution.items() if count < min_per_class]
     if underpopulated_classes:
         issues.append(f"The following classes have fewer than {min_per_class} valid samples: {', '.join(underpopulated_classes)}. Minimum required per class is {min_per_class}.")

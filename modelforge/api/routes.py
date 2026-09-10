@@ -1,9 +1,11 @@
 import os
 import shutil
 import uuid
+import html
+import re
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Header, Request, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from modelforge.db.database import get_db
@@ -22,13 +24,28 @@ STORAGE_DIR = "storage"
 os.makedirs(STORAGE_DIR, exist_ok=True)
 
 
+def sanitize_input_text(text: Optional[str]) -> Optional[str]:
+    if text is None:
+        return None
+    clean = re.sub(r'<[^>]*>', '', text)
+    clean = html.escape(clean.strip())
+    return clean
+
+
 # --- Request/Response Schemas ---
 
 class CreateModelRequest(BaseModel):
-    name: str
+    name: str = Field(..., max_length=100)
     task_type: str  # "vision" or "text"
-    description: Optional[str] = None
-    confidence_threshold: float = 0.7
+    description: Optional[str] = Field(None, max_length=1000)
+    confidence_threshold: float = Field(0.7, ge=0.0, le=1.0)
+
+    @field_validator("name", "description", mode="before")
+    @classmethod
+    def sanitize_strings(cls, v: Optional[str]) -> Optional[str]:
+        if isinstance(v, str):
+            return sanitize_input_text(v)
+        return v
 
 
 class RollbackRequest(BaseModel):
@@ -58,6 +75,9 @@ def verify_api_key(model_id: str, x_api_key: Optional[str], db: Session) -> Mode
 def create_model(req: CreateModelRequest, db: Session = Depends(get_db)):
     if req.task_type not in ["vision", "text"]:
         raise HTTPException(status_code=400, detail={"status": "error", "message": "Task type must be 'vision' or 'text'."})
+
+    if req.confidence_threshold < 0.0 or req.confidence_threshold > 1.0:
+        raise HTTPException(status_code=400, detail={"status": "error", "message": "confidence_threshold must be between 0.0 and 1.0"})
 
     model = Model(
         name=req.name,
@@ -189,7 +209,7 @@ async def upload_model_file(
     if not model:
         raise HTTPException(status_code=404, detail={"status": "error", "message": "Model not found."})
 
-    class_list = [c.strip() for c in classes.split(",") if c.strip()]
+    class_list = [sanitize_input_text(c) for c in classes.split(",") if c.strip()]
     if len(class_list) < 2:
         raise HTTPException(status_code=400, detail={"status": "error", "message": "Must provide at least 2 classes."})
 

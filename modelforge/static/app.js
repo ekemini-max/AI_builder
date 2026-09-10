@@ -1,6 +1,16 @@
 let currentSelectedModel = null;
 let f1ChartInstance = null;
 
+function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     loadModelsList();
 
@@ -95,12 +105,16 @@ async function loadModelsList() {
                     accuracyColor = 'var(--accent-green)';
                 }
 
+                const safeName = escapeHtml(model.name);
+                const safeDesc = escapeHtml(model.description || 'No description provided');
+                const safeTask = escapeHtml(model.task_type);
+
                 card.innerHTML = `
                     <div class="model-card-header">
-                        <h3>${model.name}</h3>
-                        <span class="badge">${model.task_type}</span>
+                        <h3>${safeName}</h3>
+                        <span class="badge">${safeTask}</span>
                     </div>
-                    <p class="model-desc-preview">${model.description || 'No description provided'}</p>
+                    <p class="model-desc-preview">${safeDesc}</p>
                     <div style="font-size:12px; font-weight:600; color: ${accuracyColor}; margin-bottom: 6px;">
                         ${accuracyText}
                     </div>
@@ -115,7 +129,7 @@ async function loadModelsList() {
             });
         }
     } catch (err) {
-        container.innerHTML = `<p class="placeholder-text" style="color:var(--accent-red)">Failed to load models: ${err.message}</p>`;
+        container.innerHTML = `<p class="placeholder-text" style="color:var(--accent-red)">Failed to load models: ${escapeHtml(err.message)}</p>`;
     }
 }
 
@@ -140,7 +154,7 @@ function renderModelDetails(model) {
     document.getElementById('model-detail-section').classList.remove('hidden');
     document.getElementById('detail-model-name').textContent = model.name;
     document.getElementById('detail-model-desc').textContent = model.description || 'No description provided.';
-    document.getElementById('detail-task-type').textContent = model.task_type.toUpperCase();
+    document.getElementById('detail-task-type').textContent = (model.task_type || '').toUpperCase();
     document.getElementById('detail-model-id').textContent = `ID: ${model.id}`;
     document.getElementById('detail-api-key').value = model.api_key;
 
@@ -177,15 +191,12 @@ function renderVersionHistoryAndVisuals(versions, activeVersionId) {
         return;
     }
 
-    // Find active version
     const activeVersion = versions.find(v => v.id === activeVersionId) || versions[versions.length - 1];
 
-    // Render active version Chart & Matrix if metrics present
     if (activeVersion && activeVersion.evaluation_metrics) {
         visualPanel.classList.remove('hidden');
         const em = activeVersion.evaluation_metrics;
 
-        // Trust badge
         const trustBadge = document.getElementById('trust-badge-active');
         if (em.is_trustworthy_held_out) {
             trustBadge.className = 'badge badge-free';
@@ -195,16 +206,12 @@ function renderVersionHistoryAndVisuals(versions, activeVersionId) {
             trustBadge.textContent = '⚠️ Optimistic: Training/Sanity Evaluation';
         }
 
-        // Render F1 Chart
         renderF1Chart(em.per_class_metrics);
-
-        // Render Confusion Matrix
         renderConfusionMatrix(em.classes || Object.keys(em.per_class_metrics || {}), em.confusion_matrix);
     } else {
         visualPanel.classList.add('hidden');
     }
 
-    // Render list of all versions
     listContainer.innerHTML = '';
     versions.slice().reverse().forEach(v => {
         const item = document.createElement('div');
@@ -217,9 +224,10 @@ function renderVersionHistoryAndVisuals(versions, activeVersionId) {
             let perClassRows = '';
             if (em.per_class_metrics) {
                 Object.entries(em.per_class_metrics).forEach(([cls, m]) => {
+                    const safeCls = escapeHtml(cls);
                     perClassRows += `
                         <tr>
-                            <td><strong>${cls}</strong></td>
+                            <td><strong>${safeCls}</strong></td>
                             <td>${(m.precision * 100).toFixed(1)}%</td>
                             <td>${(m.recall * 100).toFixed(1)}%</td>
                             <td>${(m.f1 * 100).toFixed(1)}%</td>
@@ -251,12 +259,15 @@ function renderVersionHistoryAndVisuals(versions, activeVersionId) {
             `;
         }
 
+        const safeFormat = escapeHtml(v.format);
+        const safeSource = escapeHtml(v.source);
+
         item.innerHTML = `
             <div style="display:flex; justify-content:space-between; align-items:center;">
                 <div>
                     <strong>Version ${v.version_number}</strong>
-                    <span class="badge" style="margin-left:6px;">${v.format}</span>
-                    <span class="subtext" style="margin-left:6px;">Source: ${v.source}</span>
+                    <span class="badge" style="margin-left:6px;">${safeFormat}</span>
+                    <span class="subtext" style="margin-left:6px;">Source: ${safeSource}</span>
                 </div>
                 <div>
                     ${v.is_active ? '<span class="badge badge-free">ACTIVE</span>' : `<button class="btn btn-secondary btn-small" onclick="handleRollback(${v.version_number})">Rollback to v${v.version_number}</button>`}
@@ -326,14 +337,15 @@ function renderConfusionMatrix(classes, confusionMatrix) {
 
     let tableHtml = '<table class="matrix-table"><thead><tr><th>Actual \\ Pred</th>';
     classes.forEach(c => {
-        tableHtml += `<th>${c}</th>`;
+        tableHtml += `<th>${escapeHtml(c)}</th>`;
     });
     tableHtml += '</tr></thead><tbody>';
 
     const maxVal = Math.max(...confusionMatrix.flat(), 1);
 
     confusionMatrix.forEach((row, i) => {
-        tableHtml += `<tr><th>${classes[i] || 'Class ' + i}</th>`;
+        const safeRowCls = escapeHtml(classes[i] || 'Class ' + i);
+        tableHtml += `<tr><th>${safeRowCls}</th>`;
         row.forEach((val, j) => {
             const intensity = Math.min((val / maxVal), 1);
             const bgColor = i === j ? `rgba(34, 197, 94, ${0.2 + intensity * 0.6})` : `rgba(239, 68, 68, ${intensity * 0.5})`;
@@ -362,14 +374,15 @@ async function handleCreateModel(e) {
         });
         const data = await res.json();
 
-        if (data.status === 'ok') {
+        if (res.ok && data.status === 'ok') {
             document.getElementById('modal-create-model').classList.add('hidden');
             document.getElementById('form-create-model').reset();
-            showToast(`Model '${name}' created successfully!`, 'success');
+            showToast(`Model '${data.model.name}' created successfully!`, 'success');
             await loadModelsList();
             selectModel(data.model.id);
         } else {
-            showToast('Failed to create model: ' + data.message, 'error');
+            const errDetail = data.detail ? (data.detail.message || JSON.stringify(data.detail)) : (data.message || 'Error');
+            showToast('Failed to create model: ' + errDetail, 'error');
         }
     } catch (err) {
         showToast('Error creating model: ' + err.message, 'error');
@@ -433,12 +446,12 @@ async function handleAutoTrain(e) {
             if (data.detail && data.detail.issues) {
                 issueText += ' Issues: ' + data.detail.issues.join('; ');
             }
-            statusBox.textContent = `❌ ${issueText}`;
+            statusBox.textContent = `❌ ${escapeHtml(issueText)}`;
             showToast('Dataset validation or training failed.', 'error');
         }
     } catch (err) {
         statusBox.style.background = 'rgba(239, 68, 68, 0.2)';
-        statusBox.textContent = `❌ Network error: ${err.message}`;
+        statusBox.textContent = `❌ Network error: ${escapeHtml(err.message)}`;
         showToast('Network error during training request.', 'error');
     } finally {
         btnText.textContent = '⚡ Start Auto-Train Pipeline';
@@ -483,12 +496,12 @@ async function handleUploadModel(e) {
             selectModel(currentSelectedModel.id);
         } else {
             statusBox.style.background = 'rgba(239, 68, 68, 0.2)';
-            statusBox.textContent = `❌ ${data.detail ? data.detail.message : 'Upload failed'}`;
+            statusBox.textContent = `❌ ${escapeHtml(data.detail ? data.detail.message : 'Upload failed')}`;
             showToast('Model upload validation failed.', 'error');
         }
     } catch (err) {
         statusBox.style.background = 'rgba(239, 68, 68, 0.2)';
-        statusBox.textContent = `❌ Network error: ${err.message}`;
+        statusBox.textContent = `❌ Network error: ${escapeHtml(err.message)}`;
         showToast('Upload network error.', 'error');
     }
 }
@@ -584,9 +597,10 @@ async function handleRunInference() {
                     const row = document.createElement('div');
                     row.className = 'prob-bar-row';
                     const pct = (prob * 100).toFixed(1);
+                    const safeClsName = escapeHtml(cls);
                     row.innerHTML = `
                         <div class="prob-label-row">
-                            <span>${cls}</span>
+                            <span>${safeClsName}</span>
                             <span>${pct}%</span>
                         </div>
                         <div class="prob-bar-bg">
