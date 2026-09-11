@@ -1,5 +1,14 @@
+const API_BASE = 'https://your-modelforge-backend.onrender.com';
+
 let currentSelectedModel = null;
 let f1ChartInstance = null;
+
+function getApiUrl(path) {
+    if (!API_BASE || window.location.origin.includes('localhost') || window.location.origin.includes('127.0.0.1')) {
+        return path;
+    }
+    return `${API_BASE.replace(/\/$/, '')}${path}`;
+}
 
 function escapeHtml(str) {
     if (str === null || str === undefined) return '';
@@ -82,7 +91,7 @@ async function loadModelsList() {
     container.innerHTML = '<p class="placeholder-text">Loading models...</p>';
 
     try {
-        const res = await fetch('/api/v1/models');
+        const res = await fetch(getApiUrl('/api/v1/models'));
         const data = await res.json();
 
         if (data.status === 'ok') {
@@ -136,7 +145,7 @@ async function loadModelsList() {
 
 async function selectModel(modelId) {
     try {
-        const res = await fetch(`/api/v1/models/${modelId}`);
+        const res = await fetch(getApiUrl(`/api/v1/models/${modelId}`));
         const data = await res.json();
 
         if (data.status === 'ok') {
@@ -367,7 +376,7 @@ async function handleCreateModel(e) {
     const confidence_threshold = parseFloat(document.getElementById('create-threshold').value);
 
     try {
-        const res = await fetch('/api/v1/models', {
+        const res = await fetch(getApiUrl('/api/v1/models'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ name, task_type, description, confidence_threshold })
@@ -420,7 +429,7 @@ async function handleAutoTrain(e) {
     }
 
     try {
-        const res = await fetch(`/api/v1/models/${currentSelectedModel.id}/autotrain`, {
+        const res = await fetch(getApiUrl(`/api/v1/models/${currentSelectedModel.id}/autotrain`), {
             method: 'POST',
             body: formData
         });
@@ -483,7 +492,7 @@ async function handleUploadModel(e) {
     }
 
     try {
-        const res = await fetch(`/api/v1/models/${currentSelectedModel.id}/upload`, {
+        const res = await fetch(getApiUrl(`/api/v1/models/${currentSelectedModel.id}/upload`), {
             method: 'POST',
             body: formData
         });
@@ -511,7 +520,7 @@ async function handleRollback(versionNumber) {
     if (!currentSelectedModel) return;
 
     try {
-        const res = await fetch(`/api/v1/models/${currentSelectedModel.id}/rollback`, {
+        const res = await fetch(getApiUrl(`/api/v1/models/${currentSelectedModel.id}/rollback`), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ version_number: versionNumber })
@@ -570,7 +579,7 @@ async function handleRunInference() {
     }
 
     try {
-        const res = await fetch(`/api/v1/models/${currentSelectedModel.id}/predict`, {
+        const res = await fetch(getApiUrl(`/api/v1/models/${currentSelectedModel.id}/predict`), {
             method: 'POST',
             headers: headers,
             body: bodyData
