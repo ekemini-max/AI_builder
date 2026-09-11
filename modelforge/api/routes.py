@@ -73,6 +73,9 @@ def verify_api_key(model_id: str, x_api_key: Optional[str], db: Session) -> Mode
 
 @router.post("/models")
 def create_model(req: CreateModelRequest, db: Session = Depends(get_db)):
+    if not req.name or not req.name.strip():
+        raise HTTPException(status_code=400, detail={"status": "error", "message": "Model name cannot be empty after removing invalid characters."})
+
     if req.task_type not in ["vision", "text"]:
         raise HTTPException(status_code=400, detail={"status": "error", "message": "Task type must be 'vision' or 'text'."})
 

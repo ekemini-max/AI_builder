@@ -12,7 +12,7 @@ def test_bug1_stored_xss_sanitization():
     """Bug 1 Regression Test: Model creation with XSS HTML payload is sanitized."""
     init_db()
 
-    xss_payload = "<img src=x onerror=alert(1)>"
+    xss_payload = "<img src=x onerror=alert(1)> Safe Name"
     resp = client.post("/api/v1/models", json={
         "name": xss_payload,
         "task_type": "text",
@@ -23,10 +23,32 @@ def test_bug1_stored_xss_sanitization():
     assert resp.status_code == 200
     model = resp.json()["model"]
 
-    # Assert raw script and image tags are stripped/escaped
     assert "<img" not in model["name"]
     assert "<script>" not in model["name"]
     assert "onerror=" not in model["name"]
+
+
+def test_bug1_empty_name_after_sanitization_rejected():
+    """Bug 1 Edge Case: Model name that sanitizes down to empty/whitespace is rejected with HTTP 400."""
+    init_db()
+
+    # Pure HTML tag payload with no inner text
+    resp = client.post("/api/v1/models", json={
+        "name": "<img src=x onerror=alert(1)>",
+        "task_type": "text",
+        "confidence_threshold": 0.6
+    })
+    assert resp.status_code == 400
+    assert "cannot be empty" in resp.json()["detail"]["message"]
+
+    # Valid name with HTML tags wrapping text
+    resp_valid = client.post("/api/v1/models", json={
+        "name": "<b></b>Cassava Classifier",
+        "task_type": "text",
+        "confidence_threshold": 0.6
+    })
+    assert resp_valid.status_code == 200
+    assert resp_valid.json()["model"]["name"] == "Cassava Classifier"
 
 
 def test_bug2_confidence_threshold_range_validation():
@@ -89,7 +111,6 @@ def test_bug3_missing_column_autotrain_validation_not_500():
             data={"text_column": "text", "label_column": "label"}
         )
 
-    # Must be 400, NOT 500 Internal Server Error
     assert resp.status_code == 400
     data = resp.json()
     assert data["detail"]["status"] == "error"
