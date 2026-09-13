@@ -1,4 +1,4 @@
-const API_BASE = 'https://your-modelforge-backend.onrender.com';
+const API_BASE = 'https://ai-builder-2hbv.onrender.com';
 
 let currentSelectedModel = null;
 let f1ChartInstance = null;
