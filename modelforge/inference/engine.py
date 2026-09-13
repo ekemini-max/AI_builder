@@ -1,12 +1,9 @@
 import os
 import io
-import torch
 import joblib
 import numpy as np
-import onnxruntime as ort
 from PIL import Image
 from typing import Dict, Any, List, Union, Optional
-from torchvision import models, transforms
 
 
 def predict_vision_pytorch(
@@ -15,6 +12,9 @@ def predict_vision_pytorch(
     image_bytes: bytes,
     confidence_threshold: float = 0.7
 ) -> Dict[str, Any]:
+    import torch
+    from torchvision import models, transforms
+
     checkpoint = torch.load(model_path, map_location="cpu")
     num_classes = len(classes)
 
@@ -67,6 +67,9 @@ def predict_vision_onnx(
     image_bytes: bytes,
     confidence_threshold: float = 0.7
 ) -> Dict[str, Any]:
+    import onnxruntime as ort
+    from torchvision import transforms
+
     session = ort.InferenceSession(model_path, providers=['CPUExecutionProvider'])
     input_name = session.get_inputs()[0].name
 
@@ -81,7 +84,6 @@ def predict_vision_onnx(
 
     raw_output = session.run(None, {input_name: tensor_np})[0][0]
 
-    # Softmax conversion
     exp_probs = np.exp(raw_output - np.max(raw_output))
     probabilities = exp_probs / exp_probs.sum()
 
@@ -118,7 +120,6 @@ def predict_text_sklearn(
     if hasattr(clf, "predict_proba"):
         probabilities = clf.predict_proba(X)[0]
     else:
-        # Decision function fallback with softmax
         decision = clf.decision_function(X)[0]
         if decision.ndim == 0:
             decision = np.array([-decision, decision])

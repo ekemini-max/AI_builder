@@ -11,12 +11,9 @@ from sqlalchemy.orm import Session
 from modelforge.db.database import get_db
 from modelforge.db.models import Model, ModelVersion, DatasetRun, EvaluationMetrics
 from modelforge.dataset.validator import validate_vision_dataset, validate_text_dataset
-from modelforge.training.vision import train_vision_model
 from modelforge.training.text import train_text_model
 from modelforge.training.gpu_handoff import generate_gpu_handoff_info
-from modelforge.registry.validator import validate_uploaded_model
 from modelforge.registry.versioning import register_new_model_version, rollback_model_version
-from modelforge.inference.engine import ModelInferenceEngine
 
 router = APIRouter()
 
@@ -208,6 +205,8 @@ async def upload_model_file(
     preprocessor_file: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db)
 ):
+    from modelforge.registry.validator import validate_uploaded_model
+
     model = db.query(Model).filter(Model.id == model_id).first()
     if not model:
         raise HTTPException(status_code=404, detail={"status": "error", "message": "Model not found."})
@@ -284,6 +283,8 @@ async def auto_train_model(
         shutil.copyfileobj(file.file, buffer)
 
     if model.task_type == "vision":
+        from modelforge.training.vision import train_vision_model
+
         val_res, extract_dir = validate_vision_dataset(dataset_filepath)
         if not val_res.is_valid:
             raise HTTPException(status_code=400, detail={"status": "error", "message": "Dataset validation failed.", "issues": val_res.issues, "warnings": val_res.warnings})
@@ -423,6 +424,8 @@ async def predict_endpoint(
     x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
     db: Session = Depends(get_db)
 ):
+    from modelforge.inference.engine import ModelInferenceEngine
+
     model = verify_api_key(model_id, x_api_key, db)
 
     if not model.active_version_id:

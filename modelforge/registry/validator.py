@@ -1,6 +1,4 @@
 import os
-import torch
-import onnxruntime as ort
 from PIL import Image
 from typing import Tuple, List, Dict, Any, Optional
 
@@ -14,12 +12,13 @@ def validate_uploaded_model(
     """
     Validates an uploaded model file (.onnx, .pt/.pth, .h5, .joblib).
     Performs format auto-detection and a sanity inference run.
-    Returns: (is_valid, detected_format, message)
+    Imports onnxruntime, torch, etc. lazily inside the validation checks.
     """
     ext = os.path.splitext(model_filepath)[1].lower()
 
     if ext == ".onnx":
         try:
+            import onnxruntime as ort
             session = ort.InferenceSession(model_filepath, providers=['CPUExecutionProvider'])
             inputs = session.get_inputs()
             if len(inputs) == 0:
@@ -30,6 +29,7 @@ def validate_uploaded_model(
 
     elif ext in [".pt", ".pth"]:
         try:
+            import torch
             checkpoint = torch.load(model_filepath, map_location="cpu")
             if isinstance(checkpoint, dict):
                 if "state_dict" not in checkpoint and not any(isinstance(v, torch.Tensor) for v in checkpoint.values()):
@@ -39,7 +39,6 @@ def validate_uploaded_model(
             return False, "pt", f"Invalid PyTorch model file: {str(e)}"
 
     elif ext == ".h5":
-        # Check basic Keras / HDF5 header or load check
         try:
             import h5py
             with h5py.File(model_filepath, 'r') as f:
@@ -47,7 +46,6 @@ def validate_uploaded_model(
                     return False, "h5", "HDF5 file has no dataset or model keys."
             return True, "h5", "HDF5/Keras model file validated successfully."
         except ImportError:
-            # Fallback check if h5py is not installed
             if os.path.getsize(model_filepath) > 0:
                 return True, "h5", "HDF5 model file size validated (h5py library optional)."
             return False, "h5", "HDF5 model file is empty."

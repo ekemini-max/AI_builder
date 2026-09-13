@@ -1,42 +1,14 @@
 import os
-import torch
-import torch.nn as nn
-import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
-from torchvision import models, transforms
-from PIL import Image
 from typing import List, Dict, Tuple, Any, Optional
 import numpy as np
+from PIL import Image
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support, confusion_matrix
 
 from modelforge.dataset.splitter import stratified_data_split
 
 
-class ImageDataset(Dataset):
-    def __init__(self, image_paths: List[str], labels: List[int], transform=None):
-        self.image_paths = image_paths
-        self.labels = labels
-        self.transform = transform
-
-    def __len__(self):
-        return len(self.image_paths)
-
-    def __getitem__(self, idx):
-        path = self.image_paths[idx]
-        label = self.labels[idx]
-        try:
-            image = Image.open(path).convert("RGB")
-        except Exception:
-            # Fallback for unexpected image load error
-            image = Image.new("RGB", (224, 224), (0, 0, 0))
-
-        if self.transform:
-            image = self.transform(image)
-
-        return image, label
-
-
 def get_vision_transforms():
+    from torchvision import transforms
     train_transform = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.RandomHorizontalFlip(p=0.5),
@@ -65,14 +37,41 @@ def train_vision_model(
 ) -> Dict[str, Any]:
     """
     Trains a lightweight MobileNetV2 classification model on CPU using transfer learning.
-    Returns comprehensive evaluation metrics on the genuine held-out test split.
+    Imports PyTorch and Torchvision lazily to prevent startup memory overhead.
     """
+    import torch
+    import torch.nn as nn
+    import torch.optim as optim
+    from torch.utils.data import Dataset, DataLoader
+    from torchvision import models
+
+    class ImageDataset(Dataset):
+        def __init__(self, image_paths: List[str], labels: List[int], transform=None):
+            self.image_paths = image_paths
+            self.labels = labels
+            self.transform = transform
+
+        def __len__(self):
+            return len(self.image_paths)
+
+        def __getitem__(self, idx):
+            path = self.image_paths[idx]
+            label = self.labels[idx]
+            try:
+                image = Image.open(path).convert("RGB")
+            except Exception:
+                image = Image.new("RGB", (224, 224), (0, 0, 0))
+
+            if self.transform:
+                image = self.transform(image)
+
+            return image, label
+
     unique_classes = sorted(list(set(class_labels)))
     class_to_idx = {cls_name: i for i, cls_name in enumerate(unique_classes)}
     idx_to_class = {i: cls_name for i, cls_name in enumerate(unique_classes)}
     numeric_labels = [class_to_idx[cls] for cls in class_labels]
 
-    # Split dataset into train, val, test splits
     tr_paths, tr_labels, val_paths, val_labels, te_paths, te_labels = stratified_data_split(
         image_paths, numeric_labels, test_size=0.2, val_size=0.1
     )
@@ -89,14 +88,11 @@ def train_vision_model(
 
     num_classes = len(unique_classes)
 
-    # Load MobileNetV2 pretrained backbone
     model = models.mobilenet_v2(weights=models.MobileNet_V2_Weights.DEFAULT)
 
-    # Freeze backbone parameters
     for param in model.parameters():
         param.requires_grad = False
 
-    # Replace classification head
     model.classifier[1] = nn.Linear(model.last_channel, num_classes)
 
     criterion = nn.CrossEntropyLoss()
@@ -105,7 +101,6 @@ def train_vision_model(
     device = torch.device("cpu")
     model.to(device)
 
-    # Training loop
     model.train()
     for epoch in range(epochs):
         for imgs, labels in train_loader:
@@ -116,7 +111,6 @@ def train_vision_model(
             loss.backward()
             optimizer.step()
 
-    # Evaluation on held-out test set
     model.eval()
     y_true = []
     y_pred = []
@@ -129,7 +123,6 @@ def train_vision_model(
             y_true.extend(labels.numpy())
             y_pred.extend(preds.numpy())
 
-    # Compute genuine held-out evaluation metrics
     acc = float(accuracy_score(y_true, y_pred))
     precision, recall, f1, support = precision_recall_fscore_support(
         y_true, y_pred, labels=list(range(num_classes)), zero_division=0
@@ -146,7 +139,6 @@ def train_vision_model(
 
     conf_mat = confusion_matrix(y_true, y_pred, labels=list(range(num_classes))).tolist()
 
-    # Save model weights & metadata
     os.makedirs(os.path.dirname(output_model_path), exist_ok=True)
     torch.save({
         "state_dict": model.state_dict(),

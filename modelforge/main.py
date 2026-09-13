@@ -32,7 +32,13 @@ app.add_middleware(
 app.include_router(api_router, prefix="/api/v1")
 
 os.makedirs("modelforge/static", exist_ok=True)
-app.mount("/static", StaticFiles(directory="modelforge/static"), name="static")
+app.mount("/static", StaticFiles(directory="modelforge/static", html=True), name="static")
+
+from fastapi.responses import FileResponse
+
+@app.get("/")
+def read_root():
+    return FileResponse("modelforge/static/index.html")
 
 
 @app.get("/health")
